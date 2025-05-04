@@ -5,7 +5,7 @@ const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_POLL_MS = 1_000;
 const DEFAULT_RETRY_MS = 60_000;
 
-async function goSleep(durationMs: number): Promise<void> {
+async function defaultGoSleep(durationMs: number): Promise<void> {
   return new Promise<void>((resolve) => {
     setTimeout(() => {
       resolve();
@@ -28,11 +28,17 @@ export interface Client {
   close(): Promise<void>;
 }
 
+type GoSleepFn = (durationMs: number) => Promise<void>;
+type NowFn = () => Date;
+const defaultNow = () => new Date();
+
 export interface Options {
-  maxFailures: number;
-  timeoutIntervalMs: number;
-  pollIntervalMs: number;
-  retryIntervalMs: number;
+  goSleep?: GoSleepFn;
+  now?: NowFn;
+  maxFailures?: number;
+  timeoutIntervalMs?: number;
+  pollIntervalMs?: number;
+  retryIntervalMs?: number;
 }
 
 interface Workflow {
@@ -55,7 +61,7 @@ interface RunData {
 export async function makeClient(
   url: string,
   handlers: Map<string, HandlerFn>,
-  options: Options,
+  options?: Options,
 ): Promise<Client> {
   const client = new MongoClient(url);
   const db = client.db();
@@ -66,6 +72,8 @@ export async function makeClient(
   const pollIntervalMs = options?.pollIntervalMs || DEFAULT_POLL_MS;
   const maxFailures = options?.maxFailures || DEFAULT_MAX_FAILURES;
   const retryIntervalMs = options?.retryIntervalMs || DEFAULT_RETRY_MS;
+  const goSleep = options?.goSleep || defaultGoSleep;
+  const now = options?.now || defaultNow;
 
   async function insert(
     workflowId: string,
@@ -98,13 +106,13 @@ export async function makeClient(
   }
 
   async function claim(): Promise<string | undefined> {
-    const now = new Date();
-    const timeoutAt = new Date(now.getTime() + timeoutIntervalMs);
+    const _now = now();
+    const timeoutAt = new Date(_now.getTime() + timeoutIntervalMs);
 
     const workflow = await workflows.findOneAndUpdate(
       {
         status: { $in: ["idle", "running", "failed"] },
-        timeoutAt: { $lt: now },
+        timeoutAt: { $lt: _now },
       },
       {
         $set: {
@@ -278,8 +286,8 @@ export async function makeClient(
       }
 
       output = await fn();
-      const now = new Date();
-      const timeoutAt = new Date(now.getTime() + timeoutIntervalMs);
+      const _now = now();
+      const timeoutAt = new Date(_now.getTime() + timeoutIntervalMs);
       await updateOutput(workflowId, stepId, output, timeoutAt);
       return output as T;
     };
@@ -288,10 +296,10 @@ export async function makeClient(
   function makeSleep(workflowId: string) {
     return async function (napId: string, ms: number): Promise<void> {
       let wakeUpAt = await findWakeUpAt(workflowId, napId);
-      const now = new Date();
+      const _now = now();
 
       if (wakeUpAt) {
-        const remainingMs = wakeUpAt.getTime() - now.getTime();
+        const remainingMs = wakeUpAt.getTime() - _now.getTime();
 
         if (remainingMs > 0) {
           await goSleep(remainingMs);
@@ -300,7 +308,7 @@ export async function makeClient(
         return;
       }
 
-      wakeUpAt = new Date(now.getTime() + ms);
+      wakeUpAt = new Date(_now.getTime() + ms);
       const timeoutAt = new Date(wakeUpAt.getTime() + timeoutIntervalMs);
       await updateWakeUpAt(workflowId, napId, wakeUpAt, timeoutAt);
       await goSleep(ms);
@@ -332,8 +340,8 @@ export async function makeClient(
       const lastError = JSON.stringify(error);
       const failures = (runData.failures || 0) + 1;
       const status = failures < maxFailures ? "failed" : "aborted";
-      const now = new Date();
-      const timeoutAt = new Date(now.getTime() + retryIntervalMs);
+      const _now = new Date();
+      const timeoutAt = new Date(_now.getTime() + retryIntervalMs);
       await updateStatus(workflowId, status, timeoutAt, failures, lastError);
       return;
     }
