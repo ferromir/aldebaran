@@ -1,0 +1,12 @@
+.github/
+coverage/
+dist/src/index.test.d.ts
+dist/src/index.test.js
+dist/jest.config.d.ts
+dist/jest.config.js
+src/
+.gitignore
+jest.config.ts
+tsconfig.json
+.prettierrc.json
+eslint.config.mjs
