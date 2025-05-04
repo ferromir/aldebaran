@@ -3,6 +3,8 @@ import {
   StartedMongoDBContainer,
 } from "@testcontainers/mongodb";
 
+jest.setTimeout(60_000);
+
 describe("docker", () => {
   let container: StartedMongoDBContainer;
 
